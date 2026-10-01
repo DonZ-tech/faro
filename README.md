@@ -1,16 +1,18 @@
 # faro
 
-CLI de análisis OSINT de operaciones de influencia en redes. Capta fuentes públicas con cadena de
-custodia (SHA-256 + timestamp), seudonimiza cuentas, detecta señales de coordinación (ráfagas,
-duplicados de texto y vídeo, lotes de creación de cuentas), construye el grafo de amplificación y
-genera un informe reproducible. Un proyecto **Don Z**.
+Herramienta OSINT de línea de comandos con cadena de custodia. Cubre dos frentes:
 
-**Primer caso: [Operación Faro](docs/informe-ceuta-2026.md)**, las convocatorias de entrada masiva
-a Ceuta de julio a septiembre de 2026. El informe de cierre recoge qué se hizo, lo que se
-encontró y sus límites.
+- **Operaciones de influencia en redes.** Capta fuentes públicas (YouTube, TikTok, Telegram, .onion),
+  seudonimiza las cuentas, detecta señales de coordinación (ráfagas, duplicados de texto y vídeo,
+  cuentas creadas en lote), construye el grafo de amplificación y genera un informe reproducible.
+- **Filtraciones de datos.** Brechas conocidas (Have I Been Pwned), código expuesto en GitHub y
+  búsquedas avanzadas (dorks) para revisar a mano. Importa además los escaneos de
+  [SpiderFoot](https://github.com/smicallef/spiderfoot).
 
-Se organiza en **campañas**: un tema, su léxico multilingüe, sus semillas y sus fechas clave. La
-primera es `ceuta-2026` (Operación Faro). La siguiente se crea con un comando.
+Todo lo que capta se guarda una vez, con su SHA-256, y se puede verificar después. Un proyecto **Don Z**.
+
+**Caso publicado:** [Operación Faro](https://github.com/DonZ-tech/operacion-faro), las
+convocatorias de entrada masiva a Ceuta de julio a septiembre de 2026.
 
 ## Instalación
 
@@ -22,108 +24,158 @@ faro --help
 
 Requiere `ffmpeg` (frames de vídeo para pHash) y `yt-dlp` (lo instala el paquete).
 
-## Dónde vive cada cosa
+## Campañas
 
-| Qué | Dónde | En el repo |
+Todo se organiza en **campañas**: un tema con su léxico multilingüe, sus semillas, sus fechas clave
+y sus dominios. Una campaña es un fichero YAML que puede ir a un repositorio; los datos que capta
+no van nunca.
+
+| Qué | Dónde | ¿Va al repositorio? |
 |---|---|---|
-| Definición de campaña (léxico, semillas, fechas) | `campaigns/<nombre>/campaign.yml` | sí |
+| Definición de campaña | `campaigns/<nombre>/campaign.yml` (o `FARO_CAMPAIGNS_DIR`) | sí |
 | Datos brutos, SQLite, frames | `~/.local/share/faro/<nombre>/` | **no** |
-| Credenciales, sesión Telegram, clave HMAC | `~/.config/faro/` (0600) | **no** |
-| Informes generados | `reports/<nombre>/` | no (gitignore) |
-
-## Flujo
+| Credenciales, sesión de Telegram, clave HMAC | `~/.config/faro/` (0600) | **no** |
+| Informes generados | `reports/<nombre>/` | no |
 
 ```bash
-# 1. Campaña
-faro campaign new ceuta-2026 -t "Operación Faro" --since 2026-07-01
-faro campaign lexicon ceuta-2026 -l ar سبتة الحريق
-faro campaign lexicon ceuta-2026 -l arabizi sebta l7rig
-faro campaign keydate ceuta-2026 2026-09-23 "Convocatoria"
+faro campaign new mi-campana -t "Título" --since 2026-07-01
+faro campaign lexicon mi-campana -l es "entrada masiva" frontera
+faro campaign keydate mi-campana 2026-09-23 "Convocatoria"
+faro seeds add domain ejemplo.es -c mi-campana
+```
 
-# 2. Credenciales (una vez). api_id/api_hash en https://my.telegram.org
+## Operaciones de influencia
+
+```bash
+# Credenciales de Telegram (una vez). api_id/api_hash en https://my.telegram.org
 faro auth telegram --phone +34XXXXXXXXX --api-id 12345 --api-hash abcdef…
 
-# 3. Semillas
-faro seeds discover -c ceuta-2026 --add          # busca canales públicos por el léxico
-faro seeds add telegram canal1 canal2 -c ceuta-2026
-faro seeds add tiktok @cuenta1 @cuenta2 -c ceuta-2026   # TikTok: cuentas o URLs, no hashtags
-faro seeds add youtube "الحريق سبتة" -c ceuta-2026
+# Semillas
+faro seeds discover -c mi-campana --add                 # canales públicos de Telegram por el léxico
+faro seeds add telegram canal1 canal2 -c mi-campana
+faro seeds add tiktok @cuenta1 @cuenta2 -c mi-campana   # TikTok: cuentas o URLs, no hashtags
+faro seeds add youtube "consulta" -c mi-campana
 
-# 4. Captación (repetible; solo inserta lo nuevo)
-faro collect telegram -c ceuta-2026 --snowball   # añade canales descubiertos por forward/mención
-faro collect all -c ceuta-2026                   # o scripts/round.sh ceuta-2026 en cron
-faro status -c ceuta-2026
+# Captación (repetible; solo inserta lo nuevo)
+faro collect telegram -c mi-campana --snowball   # añade canales descubiertos por reenvío y mención
+faro collect all -c mi-campana                   # o scripts/round.sh mi-campana en cron
+faro status -c mi-campana
 
-# 5. Análisis
-faro analyze timeline -c ceuta-2026 --plot out.png
-faro analyze bursts -c ceuta-2026 --kind text --window 10 --min-accounts 3
-faro analyze dupes -c ceuta-2026            # texto (MinHash)
-faro analyze dupes -c ceuta-2026 --media    # vídeo/imagen (pHash)
-faro analyze graph -c ceuta-2026 --gexf grafo.gexf
-faro analyze accounts -c ceuta-2026
+# Análisis
+faro analyze timeline -c mi-campana --plot out.png
+faro analyze bursts -c mi-campana --kind text --window 10 --min-accounts 3
+faro analyze dupes -c mi-campana            # texto (MinHash)
+faro analyze dupes -c mi-campana --media    # vídeo e imagen (pHash)
+faro analyze graph -c mi-campana --gexf grafo.gexf
+faro analyze accounts -c mi-campana
 
-# 6. Informe y custodia
-faro report -c ceuta-2026
-faro evidence verify -c ceuta-2026
-faro evidence list telegram:123:456 -c ceuta-2026
+# Informe
+faro report -c mi-campana
+faro timeline -c mi-campana     # usa campaigns/<c>/timeline.yml si existe
+faro site -c mi-campana         # sitio estático sin CDN
+```
+
+### Tor y .onion (adaptado de Robin)
+
+Flujo de [Robin](https://github.com/apurvsinghgautam/robin) integrado como un colector más:
+buscar en motores .onion a través de Tor, capturar las páginas como evidencia e ingerirlas como
+publicaciones `onion`.
+
+```bash
+sudo pacman -S tor && sudo systemctl enable --now tor          # Tor en 127.0.0.1:9050
+faro seeds import-robin /ruta/robin/search.py -c mi-campana   # motores .onion desde Robin
+faro seeds add onion "consulta" -c mi-campana
+faro collect onion -c mi-campana
+faro collect onion -c mi-campana --llm --summary
+```
+
+La capa LLM es opcional: refina consultas, filtra resultados y resume. Funciona con **Claude Code en
+modo headless (`claude -p`)**, así que basta con tener `claude` en el PATH. El modelo se elige con
+`FARO_CLAUDE_MODEL`.
+
+## Filtraciones
+
+```bash
+faro leaks breaches -c mi-campana            # brechas sufridas por cada dominio (gratis, sin clave)
+faro leaks hibp -c mi-campana -f emails.txt  # brechas de cada email (FARO_HIBP_API_KEY)
+faro leaks github -c mi-campana              # código público que menciona el dominio (FARO_GITHUB_TOKEN)
+faro leaks dorks -c mi-campana --open        # búsquedas avanzadas para revisar a mano
+faro leaks list -c mi-campana                # hallazgos, primero los que exponen credenciales
+faro leaks list -c mi-campana --since 2026-10-01
+```
+
+- Los **emails** no se guardan en la campaña: se pasan por argumento o fichero y se seudonimizan.
+  `faro leaks list --reveal` los muestra, solo para uso interno.
+- `leaks github` lanza una búsqueda por indicio (`password`, `smtp`, `.env`, `.sql`): la API de
+  búsqueda de código no admite `OR` entre cualificadores. Marca un fichero como sensible cuando
+  contiene una credencial asignada con valor, no cuando solo aparece la palabra.
+- Los **dorks** se generan pero no se lanzan: los buscadores no permiten automatizarlos.
+- Vigilancia de pastes: ni Telegraph ni GitHub Gists tienen API de búsqueda. Queda en los dorks.
+
+Las claves van en `~/.config/faro/credentials.env` o como variables de entorno:
+
+```
+FARO_HIBP_API_KEY=…      # https://haveibeenpwned.com/API/Key
+FARO_GITHUB_TOKEN=…      # token sin permisos: solo hace falta para buscar
+```
+
+## Importar SpiderFoot
+
+SpiderFoot es una instalación aparte. faro guarda su exportación como evidencia y la normaliza en
+la tabla `external`, así que se puede cruzar con lo demás de la campaña.
+
+```bash
+python sf.py -s ejemplo.es -m sfp_dnsresolve,sfp_whois -o json -q > escaneo.json
+faro import spiderfoot escaneo.json -c mi-campana
+```
+
+Admite el JSON y el CSV de la CLI (`-o json`, `-o csv`) y las exportaciones JSON y CSV de la
+interfaz web.
+
+## Custodia
+
+```bash
+faro evidence verify -c mi-campana             # comprueba el SHA-256 de cada captura
+faro evidence list telegram:123:456 -c mi-campana
+faro evidence reveal te_a1b2… -c mi-campana --yes   # seudónimo → cuenta real, solo uso interno
 ```
 
 ## Principios que impone el código
 
-- **Solo público.** Telethon solo entra en canales/grupos por username; yt-dlp solo en páginas públicas.
-- **Seudónimos por defecto.** Todo lo que sale (tablas, informe, GEXF) lleva `te_a1b2…`, HMAC con
-  clave local. El mapa real está en la tabla `identities`; `faro evidence reveal --yes` es la única
-  puerta y avisa.
-- **Evidencia inmutable.** Cada captura bruta se escribe una vez con su `.sha256`; `evidence verify`
-  detecta alteraciones. Cada post apunta a su captura.
-- **Coordinación exige ≥2 señales.** El informe lo dice en su propio texto.
+- **Solo fuentes públicas.** Telethon solo entra en canales y grupos por nombre de usuario; yt-dlp,
+  solo en páginas públicas.
+- **Seudónimos por defecto.** Todo lo que sale (tablas, informe, GEXF) lleva un seudónimo HMAC con
+  clave local. El mapa real está en la tabla `identities`, y solo se consulta pidiéndolo.
+- **Evidencia inmutable.** Cada captura se escribe una vez con su `.sha256`, y cada registro apunta a
+  su captura.
+- **La coordinación exige al menos dos señales.** El informe lo dice en su propio texto.
+
+## Salida por proxy
+
+Toda la captación en clearnet puede salir por un proxy. Se fija en
+`~/.config/faro/credentials.env`, por colector o para todos:
+
+```
+FARO_PROXY=socks5h://127.0.0.1:1080          # comodín
+FARO_PROXY_YTDLP=…                           # YouTube y TikTok: conviene IP residencial
+FARO_PROXY_TELEGRAM=…                        # Telegram: conviene IP fija
+FARO_PROXY_HTTP=…                            # RDAP, HIBP, GitHub
+```
+
+Si el proxy no responde, el colector sale directo y lo avisa. Tor usa su propio `FARO_TOR_PROXY`.
+La capa LLM no pasa por el proxy.
 
 ## Limitaciones conocidas
 
-- TikTok por hashtag no funciona vía yt-dlp (la API de app está rota); usar cuentas y URLs.
-- Facebook y WhatsApp quedan fuera (sin acceso público programático).
-- YouTube: la búsqueda no ordena por fecha; se filtra después por `posted_at`.
-- El léxico en dariya necesita validación de un hablante nativo.
-
-## Siguiente campaña
-
-```bash
-faro campaign new <nombre> -t "<título>" --since YYYY-MM-DD
-```
-y repetir el flujo. Nada de `ceuta-2026` está cableado en el código.
+- TikTok por hashtag no funciona con yt-dlp; hay que usar cuentas y URLs.
+- Facebook y WhatsApp quedan fuera: no tienen acceso público programático.
+- La búsqueda de YouTube no ordena por fecha; se filtra después por `posted_at`.
 
 ## Tests
 
 ```bash
 pytest -q
 ```
-
-## Módulo Tor / .onion (adaptado de Robin)
-
-Flujo de [Robin](https://github.com/apurvsinghgautam/robin) (MIT) integrado como colector más:
-buscar en motores .onion vía Tor, capturar páginas como evidencia con hash e ingerirlas como
-posts `onion`. Capa LLM opcional para refinar consultas, filtrar y resumir: usa **Claude Code en modo
-headless (`claude -p`)**, así que no hace falta API key, solo tener `claude` en el PATH. Modelo con
-`FARO_CLAUDE_MODEL` (por defecto `opus`).
-
-```bash
-sudo pacman -S tor && sudo systemctl enable --now tor          # Tor en 127.0.0.1:9050
-faro seeds import-robin /ruta/robin/search.py -c ceuta-2026   # motores .onion desde Robin
-faro seeds add onion "sebta" "haraga" -c ceuta-2026
-faro collect onion -c ceuta-2026                              # búsqueda + captura
-faro collect onion -c ceuta-2026 --llm --summary              # capa LLM vía `claude -p` (suscripción de Claude Code)
-```
-
-Diferencias con Robin: sin interfaz web ni LangChain; evidencia inmutable por página; seudónimo por
-host .onion; las páginas que no casan con el léxico se descartan salvo `--all`. El proxy se puede
-cambiar con `FARO_TOR_PROXY` en `~/.config/faro/credentials.env`.
-
-## Salida por proxy (OPSEC)
-
-Toda la captación en clearnet (YouTube, TikTok, RDAP, Telegram) puede salir por un proxy fijando
-`FARO_PROXY` en `~/.config/faro/credentials.env`, p. ej. `FARO_PROXY=socks5h://127.0.0.1:1080`
-(un túnel `ssh -D 1080` o WireGuard hacia un VPS de la marca). Tor tiene su propio `FARO_TOR_PROXY`.
-La capa LLM (`claude -p`) no pasa por el proxy: habla con Anthropic desde la sesión de Claude Code.
 
 ## Licencia
 

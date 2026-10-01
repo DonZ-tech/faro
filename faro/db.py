@@ -78,6 +78,34 @@ CREATE TABLE IF NOT EXISTS edges (
   first_seen TEXT,
   PRIMARY KEY (src, dst, kind)
 );
+CREATE TABLE IF NOT EXISTS leaks (           -- filtraciones: HIBP, GitHub
+  id TEXT PRIMARY KEY,          -- <fuente>:<clave estable>
+  source TEXT NOT NULL,         -- hibp | hibp-domain | github
+  target TEXT NOT NULL,         -- seudónimo del email, o dominio/consulta
+  title TEXT,
+  url TEXT,
+  leak_date TEXT,
+  data_classes TEXT,
+  sensitive INTEGER DEFAULT 0,  -- 1 si expone contraseñas o credenciales
+  first_seen TEXT NOT NULL,
+  last_seen TEXT NOT NULL,
+  raw_path TEXT,
+  raw_sha256 TEXT
+);
+CREATE TABLE IF NOT EXISTS external (        -- resultados importados de otras herramientas
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tool TEXT NOT NULL,           -- spiderfoot
+  kind TEXT,
+  module TEXT,
+  data TEXT,
+  source_data TEXT,
+  seen TEXT,
+  false_positive INTEGER DEFAULT 0,
+  imported_at TEXT,
+  raw_path TEXT,
+  raw_sha256 TEXT,
+  UNIQUE(tool, kind, data, source_data)
+);
 CREATE TABLE IF NOT EXISTS runs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   started TEXT, finished TEXT, platform TEXT, target TEXT, n_new INTEGER, status TEXT, error TEXT

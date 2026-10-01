@@ -1,7 +1,7 @@
 [project]
 name = "faro"
-version = "0.1.0"
-description = "CLI de análisis OSINT de operaciones de influencia en redes: captación con evidencia, seudonimización, detección de coordinación y reporte. Don Z."
+version = "0.2.0"
+description = "OSINT con cadena de custodia: operaciones de influencia en redes y filtraciones de datos. Captación con evidencia SHA-256, seudonimización, detección de coordinación e importación de SpiderFoot. Don Z."
 requires-python = ">=3.12"
 dependencies = [
   "typer>=0.12",

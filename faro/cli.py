@@ -14,19 +14,23 @@ from .paths import ensure_dirs, campaign_data, CONFIG_DIR, CAMPAIGNS_DIR
 from .campaign import Campaign, Lexicon, Seeds, KeyDate
 from . import settings
 
-app = typer.Typer(help="Análisis OSINT de operaciones de influencia en redes. Proyecto Don Z.", no_args_is_help=True)
+app = typer.Typer(help="OSINT con cadena de custodia: operaciones de influencia y filtraciones. Proyecto Don Z.", no_args_is_help=True)
 campaign_app = typer.Typer(help="Campañas: la unidad reutilizable (tema + léxico + semillas + fechas).", no_args_is_help=True)
 seeds_app = typer.Typer(help="Semillas de captación de la campaña.", no_args_is_help=True)
 collect_app = typer.Typer(help="Captación (solo fuentes públicas, con evidencia SHA-256).", no_args_is_help=True)
 analyze_app = typer.Typer(help="Análisis: timeline, ráfagas, duplicados, grafo.", no_args_is_help=True)
 auth_app = typer.Typer(help="Credenciales locales (~/.config/faro, 0600).", no_args_is_help=True)
 evidence_app = typer.Typer(help="Cadena de custodia.", no_args_is_help=True)
+leaks_app = typer.Typer(help="Filtraciones: brechas (HIBP), código expuesto en GitHub y dorks.", no_args_is_help=True)
+import_app = typer.Typer(help="Importa resultados de otras herramientas como evidencia.", no_args_is_help=True)
 app.add_typer(campaign_app, name="campaign")
 app.add_typer(seeds_app, name="seeds")
 app.add_typer(collect_app, name="collect")
 app.add_typer(analyze_app, name="analyze")
 app.add_typer(auth_app, name="auth")
 app.add_typer(evidence_app, name="evidence")
+app.add_typer(leaks_app, name="leaks")
+app.add_typer(import_app, name="import")
 con = Console()
 
 CAMP_OPT = typer.Option(..., "--campaign", "-c", envvar="FARO_CAMPAIGN", help="Nombre de la campaña")
@@ -85,7 +89,7 @@ def campaign_show(name: str):
 @campaign_app.command("lexicon")
 def campaign_lexicon(name: str, lang: str = typer.Option(..., "--lang", "-l", help="es | ar | arabizi | hashtags"),
                      terms: list[str] = typer.Argument(...)):
-    """Añade términos al léxico: faro campaign lexicon ceuta-2026 -l ar سبتة الحريق"""
+    """Añade términos al léxico: faro campaign lexicon mi-campana -l es frontera 'entrada masiva'"""
     c = _load(name)
     if lang == "hashtags":
         c.lexicon.hashtags = sorted(set(c.lexicon.hashtags) | set(terms))
@@ -110,7 +114,7 @@ def campaign_keydate(name: str, day: str, label: str):
 @seeds_app.command("add")
 def seeds_add(platform: str = typer.Argument(..., help="telegram | tiktok | youtube | domain"),
               values: list[str] = typer.Argument(...), campaign: str = CAMP_OPT):
-    """Añade semillas: faro seeds add telegram canal1 canal2 -c ceuta-2026"""
+    """Añade semillas: faro seeds add telegram canal1 canal2 -c mi-campana"""
     c = _load(campaign)
     field = {"telegram": "telegram", "tiktok": "tiktok_hashtags", "youtube": "youtube_queries", "domain": "domains",
              "onion": "onion_queries", "onion-engine": "onion_engines"}.get(platform)
@@ -250,7 +254,7 @@ def collect_domains(campaign: str = CAMP_OPT, all: bool = typer.Option(False, "-
 def collect_onion(campaign: str = CAMP_OPT, queries: Optional[list[str]] = typer.Argument(None, help="Consultas (por defecto seeds.onion_queries)"),
                   scrape_limit: int = typer.Option(30, help="Páginas a capturar"),
                   all_pages: bool = typer.Option(False, "--all", help="Capturar también las que no casan con el léxico"),
-                  llm: bool = typer.Option(False, help="Refinar consultas y filtrar resultados con Claude (FARO_ANTHROPIC_API_KEY)"),
+                  llm: bool = typer.Option(False, help="Refinar consultas y filtrar resultados con Claude (`claude -p` en el PATH)"),
                   summary: bool = typer.Option(False, help="Resumen analítico con Claude de lo capturado (implica --llm)")):
     """Busca en los motores .onion de la campaña vía Tor, captura páginas como evidencia e ingiere posts `onion` (flujo tipo Robin)."""
     from .collect import onion
@@ -267,7 +271,7 @@ def collect_onion(campaign: str = CAMP_OPT, queries: Optional[list[str]] = typer
     qs = list(queries or c.seeds.onion_queries)
     use_llm = llm or summary
     if use_llm and not llmmod.available():
-        con.print("[yellow]Sin FARO_ANTHROPIC_API_KEY: sigo sin capa LLM.[/yellow]")
+        con.print("[yellow]Sin `claude` en el PATH: sigo sin capa LLM.[/yellow]")
         use_llm = False
     if use_llm:
         qs = sorted(set(qs) | set(llmmod.refine_queries(c.title + ". " + c.description, c.lexicon.all_terms())))
@@ -518,6 +522,116 @@ def evidence_reveal(campaign: str = CAMP_OPT, pseudos: list[str] = typer.Argumen
         for ps in pseudos:
             r = db.execute("SELECT platform, handle FROM identities WHERE pseudo=?", (ps,)).fetchone()
             con.print(f"{ps} → {r[0]}:{r[1]}" if r else f"{ps} → (desconocido)")
+
+
+# ---------- leaks ----------
+def _leak_run(fn, *a, **kw) -> dict:
+    from .leaks import LeakError
+    try:
+        return fn(*a, **kw)
+    except LeakError as e:
+        con.print(f"[red]{e}[/red]")
+        raise typer.Exit(1)
+
+
+def _read_list(items: Optional[list[str]], file: Optional[Path]) -> list[str]:
+    out = list(items or [])
+    if file:
+        out += [l.strip() for l in file.read_text().splitlines() if l.strip() and not l.startswith("#")]
+    return out
+
+
+@leaks_app.command("hibp")
+def leaks_hibp(campaign: str = CAMP_OPT, emails: Optional[list[str]] = typer.Argument(None),
+               file: Optional[Path] = typer.Option(None, "--file", "-f", help="Un email por línea")):
+    """Brechas en las que aparece cada email (Have I Been Pwned; requiere FARO_HIBP_API_KEY).
+    Los emails no se guardan en la campaña: se pasan por argumento o fichero y se seudonimizan."""
+    from . import leaks
+    c = _load(campaign)
+    lst = _read_list(emails, file)
+    if not lst:
+        con.print("[red]Sin emails.[/red] Pásalos por argumento o con --file."); raise typer.Exit(1)
+    s = _leak_run(leaks.hibp_accounts, c, lst)
+    con.print(f"emails {s['emails']} · con brechas {s['found']} · hallazgos nuevos {s['new']} · errores {s['errors']}")
+
+
+@leaks_app.command("breaches")
+def leaks_breaches(campaign: str = CAMP_OPT, domains: Optional[list[str]] = typer.Argument(None, help="Por defecto seeds.domains")):
+    """Brechas sufridas por el servicio de cada dominio (HIBP, gratis y sin clave)."""
+    from . import leaks
+    c = _load(campaign)
+    doms = list(domains or c.seeds.domains)
+    if not doms:
+        con.print("[red]Sin dominios.[/red] Usa: faro seeds add domain ejemplo.com -c campaña"); raise typer.Exit(1)
+    s = _leak_run(leaks.hibp_domain_breaches, c, doms)
+    con.print(f"dominios {s['domains']} · con brechas {s['found']} · hallazgos nuevos {s['new']} · errores {s['errors']}")
+
+
+@leaks_app.command("github")
+def leaks_github(campaign: str = CAMP_OPT, queries: Optional[list[str]] = typer.Argument(None, help="Por defecto seeds.domains")):
+    """Código público en GitHub que menciona el dominio y parece contener datos o credenciales
+    (requiere FARO_GITHUB_TOKEN)."""
+    from . import leaks
+    c = _load(campaign)
+    qs = list(queries or c.seeds.domains)
+    if not qs:
+        con.print("[red]Sin consultas.[/red]"); raise typer.Exit(1)
+    s = _leak_run(leaks.github_code, c, qs)
+    con.print(f"consultas {s['queries']} · ficheros {s['files']} · nuevos {s['new']} · con indicios de credenciales {s['sensitive']}"
+              + (f" · [red]errores {s['errors']} (último: {s['last_error']})[/red]" if s["errors"] else ""))
+
+
+@leaks_app.command("dorks")
+def leaks_dorks(campaign: str = CAMP_OPT, domains: Optional[list[str]] = typer.Argument(None, help="Por defecto seeds.domains"),
+                engine: str = typer.Option("google", help="google | bing | duckduckgo"),
+                open_: bool = typer.Option(False, "--open", help="Abrir cada búsqueda en el navegador")):
+    """Genera búsquedas avanzadas para revisar a mano (los buscadores no permiten automatizarlas)."""
+    import webbrowser
+    from . import leaks
+    c = _load(campaign)
+    doms = list(domains or c.seeds.domains)
+    if not doms:
+        con.print("[red]Sin dominios.[/red]"); raise typer.Exit(1)
+    for d in doms:
+        con.print(f"[bold]{d}[/bold]")
+        for label, q in leaks.dorks(d):
+            url = leaks.dork_url(q, engine)
+            con.print(f"  {label:24} {q}")
+            con.print(f"  {'':24} [dim]{url}[/dim]")
+            if open_:
+                webbrowser.open(url)
+
+
+@leaks_app.command("list")
+def leaks_list(campaign: str = CAMP_OPT, source: Optional[str] = typer.Option(None, help="hibp | hibp-domain | github"),
+               since: Optional[str] = typer.Option(None, help="Solo lo visto por primera vez desde esta fecha (YYYY-MM-DD)"),
+               reveal: bool = typer.Option(False, "--reveal", help="Mostrar el email real en vez del seudónimo (uso interno)")):
+    """Hallazgos de filtraciones, primero los que exponen credenciales."""
+    from . import leaks
+    c = _load(campaign)
+    rows = leaks.listing(c, source, since, reveal)
+    t = Table("", "fuente", "objetivo", "qué", "fecha", "datos", "visto")
+    for r in rows:
+        t.add_row("[red]●[/red]" if r["sensitive"] else "", r["source"], r["target"], (r["title"] or "")[:60],
+                  r["leak_date"] or "", (r["data_classes"] or "")[:40], r["first_seen"][:10])
+    con.print(t)
+    con.print(f"{len(rows)} hallazgos")
+
+
+# ---------- import ----------
+@import_app.command("spiderfoot")
+def import_spiderfoot(path: Path = typer.Argument(..., exists=True, dir_okay=False, help="Exportación JSON/CSV de SpiderFoot"),
+                      campaign: str = CAMP_OPT):
+    """Guarda la exportación de un escaneo de SpiderFoot como evidencia y la normaliza."""
+    from .importers import spiderfoot
+    c = _load(campaign)
+    try:
+        s = spiderfoot.ingest(c, path)
+    except ValueError as e:
+        con.print(f"[red]{e}[/red]"); raise typer.Exit(1)
+    con.print(f"filas {s['rows']} · nuevas {s['new']}")
+    for k, v in sorted(s["types"].items(), key=lambda kv: -kv[1])[:15]:
+        con.print(f"  {v:5}  {k}")
 
 
 if __name__ == "__main__":
