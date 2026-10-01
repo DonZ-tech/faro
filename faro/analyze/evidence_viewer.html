@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8">
+<title>Grafo de evidencia</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+:root{--ink:#0F1923;--g1:#CCCCCC;--g2:#999999;--blue:#0563C1;--bg:#fff}
+*{box-sizing:border-box}body{margin:0;font-family:Arial,Helvetica,sans-serif;color:var(--ink);background:var(--bg);display:grid;grid-template-columns:1fr 360px;grid-template-rows:auto 1fr;height:100vh}
+header{grid-column:1/3;padding:14px 20px;border-bottom:1px solid var(--g1);display:flex;gap:18px;align-items:baseline;flex-wrap:wrap}
+header h1{font-size:16px;margin:0;font-weight:700}header small{color:var(--g2)}
+#canvas{position:relative;overflow:hidden}canvas{display:block;width:100%;height:100%}
+aside{border-left:1px solid var(--g1);padding:16px;overflow:auto;font-size:13px}
+aside h2{font-size:13px;margin:0 0 8px;text-transform:uppercase;letter-spacing:.04em;color:var(--g2)}
+.legend{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}.legend label{display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px}
+.sw{width:10px;height:10px;border-radius:50%;display:inline-block}
+#detail{border-top:1px solid var(--g1);padding-top:12px}#detail dt{color:var(--g2);font-size:11px;margin-top:8px}#detail dd{margin:2px 0 0;word-break:break-all}
+#detail a{color:var(--blue)}.ev{background:#f5f6f7;border:1px solid var(--g1);border-radius:4px;padding:6px 8px;font-family:monospace;font-size:11px;white-space:pre-wrap;margin-top:6px}
+input[type=search]{width:100%;padding:8px;border:1px solid var(--g1);border-radius:4px;font:inherit;margin-bottom:12px}
+footer{grid-column:1/3;border-top:1px solid var(--g1);padding:8px 20px;font-size:11px;color:var(--g2)}
+</style></head><body>
+<header><h1 id="title">Grafo de evidencia</h1><small id="stats"></small><small>Arrastra para mover · rueda para zoom · clic en nodo para ver la evidencia</small></header>
+<div id="canvas"><canvas id="c"></canvas></div>
+<aside>
+<input type="search" id="q" placeholder="Buscar nodo…">
+<h2>Tipos</h2><div class="legend" id="legend"></div>
+<h2>Detalle</h2><div id="detail"><p style="color:var(--g2)">Selecciona un nodo.</p></div>
+</aside>
+<footer>Cuentas seudonimizadas (HMAC). Cada arista conserva ID nativo, hash SHA-256 de la captura y marca temporal, o la URL de la fuente pública que la documenta.</footer>
+<script>
+const DATA=/*__DATA__*/null;
+const COLORS={account:"#0F1923",post:"#999999",domain:"#0563C1",hashtag:"#7a5c00",term:"#8a1c1c",date:"#2e7d32",entity:"#5b2a86",source:"#b36b00"};
+const SIZE={account:6,post:2.5,domain:4,hashtag:3.5,term:5,date:7,entity:6,source:5};
+const nodes=DATA.nodes.map(n=>({...n,x:Math.random()*1000,y:Math.random()*700,vx:0,vy:0}));
+const idx=Object.fromEntries(nodes.map((n,i)=>[n.id,i]));
+const links=DATA.links.map(l=>({...l,s:idx[l.source],t:idx[l.target]})).filter(l=>l.s!=null&&l.t!=null);
+const hidden=new Set();const cv=document.getElementById("c"),ctx=cv.getContext("2d");
+let W,H,tx=0,ty=0,k=1,drag=null,sel=null,hover=null;
+function resize(){W=cv.width=cv.parentElement.clientWidth;H=cv.height=cv.parentElement.clientHeight}window.onresize=resize;resize();
+document.getElementById("title").textContent=(DATA.campaign.title||"Grafo de evidencia")+" — grafo de evidencia";
+document.getElementById("stats").textContent=nodes.length+" nodos · "+links.length+" aristas";
+const types=[...new Set(nodes.map(n=>n.type))];
+document.getElementById("legend").innerHTML=types.map(t=>`<label><input type="checkbox" checked data-t="${t}"><span class="sw" style="background:${COLORS[t]||"#000"}"></span>${t} (${nodes.filter(n=>n.type===t).length})</label>`).join("");
+document.querySelectorAll("#legend input").forEach(i=>i.onchange=()=>{i.checked?hidden.delete(i.dataset.t):hidden.add(i.dataset.t)});
+const deg=new Array(nodes.length).fill(0);links.forEach(l=>{deg[l.s]++;deg[l.t]++});
+let alpha=1;
+function step(){ // fuerza simple: repulsión O(n²) por cuadrícula, atracción por aristas, centro
+  const cell=60,grid=new Map();nodes.forEach((n,i)=>{if(hidden.has(n.type))return;const key=((n.x/cell)|0)+","+((n.y/cell)|0);(grid.get(key)||grid.set(key,[]).get(key)).push(i)});
+  nodes.forEach((n,i)=>{if(hidden.has(n.type))return;const gx=(n.x/cell)|0,gy=(n.y/cell)|0;
+    for(let dx=-1;dx<=1;dx++)for(let dy=-1;dy<=1;dy++){const c=grid.get((gx+dx)+","+(gy+dy));if(!c)continue;
+      for(const j of c){if(j===i)continue;const m=nodes[j];let ddx=n.x-m.x,ddy=n.y-m.y,d2=ddx*ddx+ddy*ddy+0.01;if(d2>cell*cell)continue;const f=900/d2;n.vx+=ddx*f*alpha;n.vy+=ddy*f*alpha}}
+    n.vx+=(W/2-n.x)*0.002*alpha;n.vy+=(H/2-n.y)*0.002*alpha});
+  links.forEach(l=>{const a=nodes[l.s],b=nodes[l.t];if(hidden.has(a.type)||hidden.has(b.type))return;const dx=b.x-a.x,dy=b.y-a.y,d=Math.sqrt(dx*dx+dy*dy)+0.01,f=(d-40)*0.02*alpha;a.vx+=dx/d*f;a.vy+=dy/d*f;b.vx-=dx/d*f;b.vy-=dy/d*f});
+  nodes.forEach(n=>{if(n===drag)return;n.x+=n.vx*=0.6;n.y+=n.vy*=0.6});
+  alpha=Math.max(0.02,alpha*0.995)}
+function draw(){ctx.clearRect(0,0,W,H);ctx.save();ctx.translate(tx,ty);ctx.scale(k,k);
+  ctx.lineWidth=0.6/k;links.forEach(l=>{const a=nodes[l.s],b=nodes[l.t];if(hidden.has(a.type)||hidden.has(b.type))return;const on=sel&&(a===sel||b===sel);ctx.strokeStyle=on?"#0563C1":"rgba(15,25,35,0.12)";ctx.lineWidth=(on?1.5:0.6)/k;ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke()});
+  nodes.forEach((n,i)=>{if(hidden.has(n.type))return;const r=(SIZE[n.type]||3)+Math.min(8,Math.sqrt(deg[i]));ctx.fillStyle=COLORS[n.type]||"#000";ctx.globalAlpha=sel&&sel!==n&&!links.some(l=>(nodes[l.s]===sel&&nodes[l.t]===n)||(nodes[l.t]===sel&&nodes[l.s]===n))?0.25:1;ctx.beginPath();ctx.arc(n.x,n.y,r,0,7);ctx.fill();ctx.globalAlpha=1;
+    if(n===sel||n===hover||(k>1.4&&n.type!=="post")||n.type==="date"||n.type==="entity"||n.type==="source"){ctx.fillStyle="#0F1923";ctx.font=(11/k)+"px Arial";ctx.fillText(n.label||n.id,n.x+r+3/k,n.y+4/k)}});
+  ctx.restore()}
+function loop(){step();draw();requestAnimationFrame(loop)}loop();
+function pick(mx,my){const x=(mx-tx)/k,y=(my-ty)/k;let best=null,bd=100/k/k;nodes.forEach((n,i)=>{if(hidden.has(n.type))return;const d=(n.x-x)**2+(n.y-y)**2;if(d<bd){bd=d;best=n}});return best}
+let pan=null;cv.onmousedown=e=>{const n=pick(e.offsetX,e.offsetY);if(n){drag=n;alpha=Math.max(alpha,0.3)}else pan={x:e.offsetX-tx,y:e.offsetY-ty}};
+cv.onmousemove=e=>{if(drag){drag.x=(e.offsetX-tx)/k;drag.y=(e.offsetY-ty)/k}else if(pan){tx=e.offsetX-pan.x;ty=e.offsetY-pan.y}else hover=pick(e.offsetX,e.offsetY)};
+cv.onmouseup=e=>{if(drag&&!pan){select(drag)}drag=null;pan=null};
+cv.onwheel=e=>{e.preventDefault();const f=e.deltaY<0?1.1:0.9;tx=e.offsetX-(e.offsetX-tx)*f;ty=e.offsetY-(e.offsetY-ty)*f;k*=f};
+function esc(s){return String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
+function select(n){sel=n;const d=document.getElementById("detail");const skip=new Set(["x","y","vx","vy","id","label","type"]);
+  let h=`<dl><dt>${esc(n.type)}</dt><dd><b>${esc(n.label||n.id)}</b></dd><dt>id</dt><dd>${esc(n.id)}</dd>`;
+  for(const [key,v] of Object.entries(n)){if(skip.has(key)||v===""||v==null)continue;h+=`<dt>${esc(key)}</dt><dd>${key==="url"?`<a href="${esc(v)}" target="_blank" rel="noopener">${esc(v)}</a>`:esc(v)}</dd>`}
+  h+="</dl><h2 style='margin-top:14px'>Aristas ("+links.filter(l=>nodes[l.s]===n||nodes[l.t]===n).length+")</h2>";
+  links.filter(l=>nodes[l.s]===n||nodes[l.t]===n).slice(0,60).forEach(l=>{const o=nodes[l.s]===n?nodes[l.t]:nodes[l.s];const dir=nodes[l.s]===n?"→":"←";
+    h+=`<div style="margin-top:8px"><span style="color:var(--g2)">${esc(l.type)}</span> ${dir} <a href="#" data-id="${esc(o.id)}" style="color:var(--blue)">${esc(o.label||o.id)}</a>${l.weight>1?` <small>×${l.weight}</small>`:""}${l.evidence?`<div class="ev">${esc(l.evidence)}</div>`:""}</div>`});
+  d.innerHTML=h;d.querySelectorAll("a[data-id]").forEach(a=>a.onclick=ev=>{ev.preventDefault();const t=nodes[idx[a.dataset.id]];if(t){select(t);tx=W/2-t.x*k;ty=H/2-t.y*k}})}
+document.getElementById("q").oninput=e=>{const q=e.target.value.toLowerCase();if(!q)return;const n=nodes.find(n=>(n.label||n.id).toLowerCase().includes(q)||n.id.toLowerCase().includes(q));if(n){select(n);tx=W/2-n.x*k;ty=H/2-n.y*k}};
+</script></body></html>

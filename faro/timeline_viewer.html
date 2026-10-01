@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><title>Línea temporal</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+:root{--ink:#0F1923;--g1:#CCCCCC;--g2:#999999;--blue:#0563C1;--soft:#f5f6f7}
+*{box-sizing:border-box}body{margin:0;font-family:Arial,Helvetica,sans-serif;color:var(--ink);background:#fff;line-height:1.45}
+.wrap{max-width:1100px;margin:0 auto;padding:28px 24px 60px}
+h1{font-size:22px;margin:0 0 4px}.sub{color:var(--g2);font-size:13px;margin-bottom:26px}
+h2{font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:var(--g2);margin:34px 0 12px}
+#chart{width:100%;height:260px;display:block}
+.legend{display:flex;gap:16px;font-size:12px;color:var(--g2);margin-top:6px;flex-wrap:wrap}.legend i{display:inline-block;width:10px;height:10px;margin-right:5px;vertical-align:middle}
+.tl{position:relative;margin-top:10px;padding-left:26px;border-left:2px solid var(--g1)}
+.tramo{margin:0 0 34px;position:relative}
+.tramo::before{content:"";position:absolute;left:-33px;top:6px;width:12px;height:12px;border-radius:50%;background:#fff;border:2px solid var(--ink)}
+.tramo .when{font-size:12px;color:var(--g2)}.tramo h3{margin:2px 0 8px;font-size:17px}
+.tramo .vol{font-size:12px;color:var(--g2);margin-bottom:8px}
+.tramo p{margin:0 0 10px;max-width:74ch}
+.sig{display:flex;flex-wrap:wrap;gap:6px}.sig span{font-size:11px;border:1px solid var(--g1);border-radius:4px;padding:2px 7px;color:var(--ink)}
+.ms{margin:10px 0 0;padding:0;list-style:none}.ms li{font-size:13px;padding:6px 0 6px 0;border-top:1px dashed var(--g1);display:grid;grid-template-columns:86px 92px 1fr;gap:10px}
+.ms li .d{font-family:monospace;font-size:12px}.ms li .k{font-size:11px;color:#fff;background:var(--g2);border-radius:4px;padding:1px 6px;justify-self:start;align-self:start}
+.k.incitación{background:#8a1c1c}.k.coordinación{background:#5b2a86}.k.hecho{background:var(--ink)}.k.respuesta{background:#2e7d32}.k.narrativa{background:#7a5c00}.k.legal{background:var(--blue)}.k.análisis{background:#b36b00}
+.ms li .s{color:var(--g2);font-size:11px;display:block}
+footer{margin-top:40px;border-top:1px solid var(--g1);padding-top:10px;font-size:11px;color:var(--g2)}
+@media(max-width:640px){.ms li{grid-template-columns:1fr}}
+</style></head><body><div class="wrap">
+<h1 id="t"></h1><div class="sub" id="sub"></div>
+<h2>Publicaciones relevantes por día (corpus propio) y hitos</h2>
+<svg id="chart" viewBox="0 0 1100 260" preserveAspectRatio="none"></svg>
+<div class="legend" id="lg"></div>
+<h2>Tramos: qué se está incitando</h2>
+<div class="tl" id="tl"></div>
+<footer>Los volúmenes salen de la base de datos de la campaña (publicaciones que casan con el léxico, por día y plataforma; solo fuentes públicas con hash de captura). Los hitos citan su fuente. La lectura de cada tramo es analítica y se apoya en las fuentes indicadas.</footer>
+</div>
+<script>
+const D=/*__DATA__*/null;const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+document.getElementById("t").textContent=D.campaign+" — línea temporal";
+document.getElementById("sub").textContent="faro "+D.version+" · generado "+D.generated+" · Don Z";
+const COL={youtube:"#0563C1",tiktok:"#0F1923",telegram:"#999999",x:"#7a5c00"};
+const plats=[...new Set(D.series.flatMap(r=>Object.keys(r).filter(k=>k!=="day")))];
+const days=[];{const d0=new Date(Math.min(new Date(D.series[0]?.day||D.milestones[0].date),new Date(D.milestones[0].date)));const d1=new Date(Math.max(new Date(D.series.at(-1)?.day||0),new Date(D.milestones.at(-1).date)));for(let d=new Date(d0);d<=d1;d.setDate(d.getDate()+1))days.push(d.toISOString().slice(0,10))}
+const byDay=Object.fromEntries(D.series.map(r=>[r.day,r]));const max=Math.max(1,...D.series.map(r=>plats.reduce((a,p)=>a+(r[p]||0),0)));
+const svg=document.getElementById("chart");const W=1100,H=260,L=34,R=10,T=18,B=40,pw=W-L-R,bw=pw/days.length;let s="";
+[0,0.5,1].forEach(f=>{const y=T+(H-T-B)*(1-f);s+=`<line x1="${L}" x2="${W-R}" y1="${y}" y2="${y}" stroke="#eee"/><text x="${L-6}" y="${y+4}" font-size="10" fill="#999" text-anchor="end">${Math.round(max*f)}</text>`});
+days.forEach((d,i)=>{let y=T+(H-T-B);const r=byDay[d];if(r)plats.forEach(p=>{const v=r[p]||0;if(!v)return;const h=v/max*(H-T-B);y-=h;s+=`<rect x="${L+i*bw+0.5}" y="${y}" width="${Math.max(1,bw-1)}" height="${h}" fill="${COL[p]||"#666"}"><title>${d} · ${p}: ${v}</title></rect>`});
+  if(d.endsWith("-01")||d.endsWith("-15"))s+=`<text x="${L+i*bw+bw/2}" y="${H-B+14}" font-size="10" fill="#999" text-anchor="middle">${d.slice(5)}</text>`});
+let lvl=0;D.milestones.forEach((m,i)=>{const idx=days.indexOf(m.date);if(idx<0)return;const x=L+idx*bw+bw/2;s+=`<line x1="${x}" x2="${x}" y1="${T-6}" y2="${H-B}" stroke="#999" stroke-dasharray="3 3"/><circle cx="${x}" cy="${H-B+26+(lvl%2)*8}" r="3.5" fill="${m.kind==="incitement"?"#8a1c1c":m.kind==="event"?"#0F1923":"#999"}"><title>${esc(m.date)} — ${esc(m.label)}</title></circle>`;lvl++});
+svg.innerHTML=s;
+document.getElementById("lg").innerHTML=plats.map(p=>`<span><i style="background:${COL[p]||"#666"}"></i>${p}</span>`).join("")+`<span><i style="background:#8a1c1c;border-radius:50%"></i>hito de incitación</span><span><i style="background:#0F1923;border-radius:50%"></i>hecho</span><span><i style="background:#999;border-radius:50%"></i>otros hitos</span>`;
+const tl=document.getElementById("tl");
+D.tramos.forEach(t=>{const ms=D.milestones.filter(m=>m.date>=t.from&&m.date<=t.to);const vol=Object.entries(t.volume||{}).sort().map(([k,v])=>`${k} ${v}`).join(" · ")||"sin corpus propio";
+  tl.insertAdjacentHTML("beforeend",`<section class="tramo"><div class="when">${t.from} → ${t.to}</div><h3>${esc(t.title)}</h3><div class="vol">Publicaciones relevantes: ${esc(vol)} · Fuentes: ${esc((t.sources||[]).join(", "))}</div><p>${esc(t.incitement.trim())}</p><div class="sig">${(t.signals||[]).map(x=>`<span>${esc(x)}</span>`).join("")}</div>
+  ${ms.length?`<ul class="ms">${ms.map(m=>`<li><span class="d">${m.date}</span><span class="k ${esc(m.kind_es)}">${esc(m.kind_es)}</span><span>${esc(m.label)}<span class="s">Fuente: ${esc(m.source||"")}</span></span></li>`).join("")}</ul>`:""}</section>`)});
+const after=D.milestones.filter(m=>!D.tramos.some(t=>m.date>=t.from&&m.date<=t.to));
+if(after.length)tl.insertAdjacentHTML("beforeend",`<section class="tramo"><div class="when">próximo</div><h3>Horizonte</h3><ul class="ms">${after.map(m=>`<li><span class="d">${m.date}</span><span class="k ${esc(m.kind_es)}">${esc(m.kind_es)}</span><span>${esc(m.label)}<span class="s">Fuente: ${esc(m.source||"")}</span></span></li>`).join("")}</ul></section>`);
+</script></body></html>
